@@ -1,5 +1,6 @@
-selenium 
-webdriver-manager 
-python-dotenv 
-google-api-python-client 
+selenium
+celery
+redis
+python-dotenv
+google-api-python-client
 google-auth-oauthlib

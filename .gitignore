@@ -4,3 +4,7 @@
 credentials.json
 token.json
 csvs/
+# Mounted secrets
+config/*.json
+!config/*.json.example
+data/
