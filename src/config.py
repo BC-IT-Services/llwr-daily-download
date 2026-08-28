@@ -2,7 +2,8 @@
 
     /config/ipc_config.json   - shared RabbitMQ / Redis broker settings
     /config/llwr_config.json  - portal credentials, report parameters, Drive target
-    /config/google/           - credentials.json + token.json (mounted writable)
+    /secrets/token.json       - Google token (own mount point, WRITABLE;
+                                override with GOOGLE_CONFIG_DIR)
 
 Environment variables remain a fallback so local runs keep working.
 """
@@ -147,10 +148,17 @@ class Settings:
 
     # --- Google auth (mounted, non-interactive) ---
 
+    # Deliberately NOT under /config: that mount is read-only by convention in
+    # our stacks, and the token has to be writable so refreshes persist. A
+    # writable mount nested inside a read-only one also fails outright at
+    # container start (Docker cannot create the mountpoint), so the writable
+    # secret gets its own top-level path.
+    GOOGLE_DIR_DEFAULT = "/secrets"
+
     @property
     def google_dir(self) -> Path:
         return Path(
-            self._section("google", "dir", "GOOGLE_CONFIG_DIR", str(CONFIG_DIR / "google"))
+            self._section("google", "dir", "GOOGLE_CONFIG_DIR", self.GOOGLE_DIR_DEFAULT)
         )
 
     @property

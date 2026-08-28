@@ -23,8 +23,8 @@ ENV PYTHONPATH=/app/src
 ENV CHROME_BINARY=/usr/bin/chromium
 
 RUN adduser --disabled-password --gecos '' appuser && \
-    mkdir -p /data/csvs && \
-    chown -R appuser:appuser /app /data
+    mkdir -p /data/csvs /secrets && \
+    chown -R appuser:appuser /app /data /secrets
 
 USER appuser
 
