@@ -15,6 +15,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus
 
 logger = logging.getLogger(__name__)
 
@@ -210,21 +211,41 @@ class Settings:
         return self.ipc_config.get("redis", {}).get("password", "")
 
     @property
-    def redis_celery_db(self) -> int:
-        return self.ipc_config.get("redis", {}).get("celery_db", 1)
+    def redis_result_db(self) -> int:
+        """Redis DB for Celery results.
+
+        Must match what the *gateway* reads from, because the gateway is what
+        polls these task results to decide a run finished. The gateway builds
+        its backend from `redis.cache_db`, so that is the source of truth here
+        - not `redis.celery_db`, which the gateway never reads and which
+        ipc_config.json does not even define. Getting this wrong does not fail
+        loudly: the task runs and stores its result somewhere the gateway never
+        looks, so the job simply never leaves "running".
+
+        Set `celery.result_backend_db` to override deliberately.
+        """
+        explicit = self.ipc_config.get("celery", {}).get("result_backend_db")
+        if explicit is not None:
+            return int(explicit)
+        return int(self.ipc_config.get("redis", {}).get("cache_db", 0))
 
     @property
     def celery_broker_url(self) -> str:
-        vhost = f"/{self.rabbitmq_vhost}" if self.rabbitmq_vhost else "//"
+        # Built exactly as the gateway builds it, password-encoding included.
+        encoded_pass = quote_plus(self.rabbitmq_password)
+        vhost_part = f"/{self.rabbitmq_vhost}" if self.rabbitmq_vhost else "/"
         return (
-            f"amqp://{self.rabbitmq_user}:{self.rabbitmq_password}"
-            f"@{self.rabbitmq_host}:{self.rabbitmq_port}{vhost}"
+            f"amqp://{self.rabbitmq_user}:{encoded_pass}"
+            f"@{self.rabbitmq_host}:{self.rabbitmq_port}{vhost_part}"
         )
 
     @property
     def celery_result_backend(self) -> str:
-        auth = f":{self.redis_password}@" if self.redis_password else ""
-        return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_celery_db}"
+        encoded_pass = quote_plus(self.redis_password)
+        return (
+            f"redis://:{encoded_pass}@{self.redis_host}:"
+            f"{self.redis_port}/{self.redis_result_db}"
+        )
 
     @property
     def celery_task_timeout(self) -> int:
