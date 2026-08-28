@@ -1,0 +1,6 @@
+.venv
+*cache*
+.env
+credentials.json
+token.json
+csvs/
