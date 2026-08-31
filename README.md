@@ -15,8 +15,7 @@ Config comes from JSON files mounted at `/config`, matching the other services:
 |---|---|
 | `/config/ipc_config.json` | Shared RabbitMQ / Redis settings |
 | `/config/llwr_config.json` | Portal credentials, report parameters, Drive target |
-| `/config/google/credentials.json` | Google OAuth client (read-only) |
-| `/config/google/token.json` | Authorised user token — **must be mounted writable** |
+| `/secrets/token.json` | Authorised user token — **must be mounted writable**. Own top-level mount, deliberately not under `/config` |
 
 Copy `config/llwr_config.json.example` and fill it in. `PORTAL_USER` /
 `PORTAL_PASS` environment variables still work as a fallback.
@@ -26,11 +25,40 @@ services:
   llwr-worker:
     image: ghcr.io/<org>/llwr-daily-download:latest
     volumes:
-      - /srv/config:/config:ro
-      - /srv/config/google:/config/google:rw   # token.json must be writable
+      - ${CONFIG_LOCATION}:/config:ro                 # *_config.json
+      - ${CREDENTIALS_LOCATION}:/secrets/token.json   # writable, NOT under /config
       - llwr_data:/data
     restart: unless-stopped
 ```
+
+`/secrets` is the default token location, so no extra environment variable is
+needed. Set `GOOGLE_CONFIG_DIR` only if you want it somewhere else.
+
+Only `token.json` needs mounting at runtime — it already contains the client id,
+secret and refresh token. `credentials.json` is used solely for the one-off
+interactive authorisation on a workstation.
+
+> **Do not nest a writable mount inside a read-only one.** Mounting
+> `/config:ro` and then `/config/google/token.json:rw` fails at container start
+> with `make mountpoint ... read-only file system`. Docker mounts the shorter
+> path first, then has to create the `/config/google` mountpoint *inside* the
+> already read-only `/config` — so it never even reaches the host file, and no
+> amount of `chmod` on the host changes it. Nesting on the **host** side is
+> fine; it is the container-side path that matters.
+
+If you would rather keep the token under `/config`, drop the `:ro` so the
+whole mount is writable and set `GOOGLE_CONFIG_DIR=/config`.
+
+### File permissions
+
+The container runs as `appuser`, so the token must be writable by *other*:
+
+```bash
+chmod o+rw /home/manage/api-config/llwrsync/token.json
+```
+
+A read-only token is not fatal — the job still runs, but it re-refreshes every
+time and logs a warning.
 
 ### Google authentication
 

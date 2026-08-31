@@ -5,8 +5,13 @@ browser for consent — impossible in a headless container, where it would hang
 until the task timed out rather than failing. Here the token is mounted and
 only ever refreshed:
 
-    /config/google/credentials.json  (OAuth client, read-only)
-    /config/google/token.json        (authorised user token, MOUNTED WRITABLE)
+    /secrets/token.json  (authorised user token, MOUNTED WRITABLE)
+
+It lives on its own top-level mount, not under /config: that mount is read-only
+by convention, and Docker cannot even create a writable mountpoint nested
+inside a read-only one. Override the directory with GOOGLE_CONFIG_DIR.
+Only the token is needed at runtime - it carries the client id, secret and
+refresh token. credentials.json is used solely by --authorise below.
 
 token.json must be writable: a refreshed access token is written back, and
 losing that would mean a fresh refresh on every run. If the token is missing or
