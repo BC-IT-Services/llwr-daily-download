@@ -25,6 +25,15 @@ celery_core.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_time_limit=settings.celery_task_timeout,
+    # Celery's default is 24 hours, which on a shared 4 GB host meant 40,000
+    # finished-task results sitting in Redis using 1.4 GB - more than a third
+    # of the machine's RAM - and Redis being picked as the OOM victim.
+    #
+    # Nothing reads a result after the caller has taken it: the gateway's
+    # dispatcher polls within a minute of completion and never looks again. The
+    # floor is "longest task + polling interval", so an hour is generous even
+    # for the 20-minute iTrent extract.
+    result_expires=settings.celery_result_expires,
     task_soft_time_limit=max(settings.celery_task_timeout - 30, 30),
     broker_connection_retry_on_startup=True,
     worker_prefetch_multiplier=1,

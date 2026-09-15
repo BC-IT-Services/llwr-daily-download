@@ -86,10 +86,35 @@ python src/google_auth.py
 | Setting | Notes |
 |---|---|
 | `report.provider` | Provider dropdown text, e.g. `Bridgend College (F0009004)` |
-| `report.year` | Year dropdown text. **Leave blank to always take the latest year the portal offers** — otherwise the job keeps pulling the pinned year after the rollover |
+| `report.year` | Year dropdown text for a single-year setup. **Leave blank to always take the latest year the portal offers** — otherwise the job keeps pulling the pinned year after the rollover |
+| `report.years` | Download *multiple* years in one run, each to its own Drive folder — see below. Takes priority over `report.year` when set |
 | `report.third_parameter` | Third dropdown, defaults to `All` |
 | `output.upload_to_drive` | Set false to download only |
 | `output.keep_local_copy` | Set false to delete the CSV after a successful upload |
+
+#### Multiple years
+
+The portal only shows one academic year as "current" — around rollover, the
+year that just ended drops out of `report.year`'s "latest offered" fallback
+while it may still need a daily pull (e.g. late enrolments, corrections).
+`report.years` downloads each listed year in its own browser session and
+uploads it to its own Drive folder:
+
+```json
+"report": {
+  "provider": "Bridgend College (F0009004)",
+  "years": [
+    { "year": "2025", "drive_folder_id": "1sJzKUn9kLm8JPhLr7y0SB4hUd9YyqATZ" },
+    { "year": "2026", "drive_folder_id": "1Td-1x1rA2Qok3MCVRi5lo1IMdBnC6cph" }
+  ]
+}
+```
+
+Every listed year is attempted even if an earlier one fails, so one bad year
+doesn't stop the others being fetched — the task still raises (and so still
+retries) if any year failed, listing which years succeeded in the error.
+Each downloaded file is named `data_summary_<year>_<date>.csv` so two years
+in the same run don't overwrite each other's local copy.
 
 ## Scheduling
 

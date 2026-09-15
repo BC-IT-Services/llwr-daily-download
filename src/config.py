@@ -107,6 +107,35 @@ class Settings:
         return str(self._section("report", "year", "LLWR_YEAR", ""))
 
     @property
+    def report_years(self) -> list[dict[str, str]]:
+        """Academic years to download in one run, each to its own Drive folder.
+
+        The portal only shows one academic year as "current" at a time, so
+        around rollover the previous year drops off report.year's "latest
+        offered" fallback while it may still need pulling daily. Configure
+        multiple years explicitly:
+
+            "report": {"years": [
+                {"year": "2025", "drive_folder_id": "..."},
+                {"year": "2026", "drive_folder_id": "..."}
+            ]}
+
+        Falls back to the single report.year / output.drive_folder_id pair
+        when report.years is not set, so existing single-year configs keep
+        working unchanged.
+        """
+        years = (self.llwr_config.get("report") or {}).get("years")
+        if years:
+            return [
+                {
+                    "year": str(entry["year"]),
+                    "drive_folder_id": entry.get("drive_folder_id") or self.drive_folder_id,
+                }
+                for entry in years
+            ]
+        return [{"year": self.report_year, "drive_folder_id": self.drive_folder_id}]
+
+    @property
     def report_third_parameter(self) -> str:
         return self._section("report", "third_parameter", "LLWR_THIRD_PARAM", "All")
 
@@ -246,6 +275,23 @@ class Settings:
             f"redis://:{encoded_pass}@{self.redis_host}:"
             f"{self.redis_port}/{self.redis_result_db}"
         )
+
+    @property
+    def celery_result_expires(self) -> int:
+        """How long a finished task's result lives in Redis, in seconds.
+
+        Celery defaults to 24 hours. That is far longer than anything reads
+        one: the gateway's dispatcher polls a result within a minute of the
+        task finishing and never looks again. A day of results from the bulk
+        queries (some over 1 MB each) reached 1.4 GB on a 4 GB host and got
+        Redis OOM-killed.
+
+        The floor is "longest task + polling interval" - shorter than that and
+        a result can vanish before the dispatcher reads it, which puts the job
+        back to looking permanently stuck.
+        """
+        value = self.ipc_config.get("celery", {}).get("result_expires")
+        return int(value) if value not in (None, "") else 3600
 
     @property
     def celery_task_timeout(self) -> int:

@@ -81,7 +81,7 @@ def _login(driver, wait) -> None:
     time.sleep(3)
 
 
-def _select_parameters(driver, wait) -> None:
+def _select_parameters(driver, wait, year: str) -> None:
     print("Loading report page...")
     driver.get(settings.report_url)
 
@@ -98,21 +98,20 @@ def _select_parameters(driver, wait) -> None:
     Select(provider_dd).select_by_visible_text(settings.report_provider)
     time.sleep(2)
 
-    year = settings.report_year
     year_dd = Select(driver.find_element(By.ID, YEAR_DROPDOWN_ID))
     available = [o.text.strip() for o in year_dd.options if o.text.strip()]
     if year:
         if year not in available:
             raise LlwrDownloadError(
                 f"Report year {year!r} is not offered. Available: {available}. "
-                "Update report.year in /config/llwr_config.json."
+                "Update report.year / report.years in /config/llwr_config.json."
             )
         year_dd.select_by_visible_text(year)
     else:
         # No year pinned: take the latest the portal offers, so the job does not
         # silently keep pulling last year's data after the rollover.
         latest = sorted(available)[-1]
-        print(f"No report.year configured - using the latest offered ({latest}).")
+        print(f"No year configured - using the latest offered ({latest}).")
         year_dd.select_by_visible_text(latest)
     time.sleep(2)
 
@@ -138,10 +137,10 @@ def _wait_for_download(download_dir: str, existing: set[str], timeout: int) -> s
     )
 
 
-def _upload_to_drive(file_path: str, filename: str) -> str:
+def _upload_to_drive(file_path: str, filename: str, drive_folder_id: str) -> str:
     print("Uploading to Google Drive...")
     drive_service = build_auth_service('drive')
-    metadata = {"name": filename, "parents": [settings.drive_folder_id]}
+    metadata = {"name": filename, "parents": [drive_folder_id]}
     media = MediaFileUpload(file_path, mimetype="text/csv", resumable=True)
     uploaded = drive_service.files().create(
         body=metadata, media_body=media, fields="id"
@@ -151,8 +150,14 @@ def _upload_to_drive(file_path: str, filename: str) -> str:
     return file_id
 
 
-def get_data_summary() -> dict:
-    """Run the full download. Returns a summary dict; raises on failure."""
+def _download_one(year: str, drive_folder_id: str) -> dict:
+    """Download+upload a single report year in its own browser session.
+
+    A fresh login per year (rather than re-selecting the Year dropdown and
+    re-exporting within one session) mirrors the flow the portal's SSRS
+    report viewer was actually exercised with, instead of assuming a second
+    in-session export is reliable.
+    """
     started = datetime.utcnow()
     download_dir = settings.download_dir
     os.makedirs(download_dir, exist_ok=True)
@@ -162,7 +167,7 @@ def get_data_summary() -> dict:
 
     try:
         _login(driver, wait)
-        _select_parameters(driver, wait)
+        _select_parameters(driver, wait, year)
 
         print("Rendering report...")
         driver.find_element(By.ID, VIEW_BUTTON_ID).click()
@@ -180,7 +185,11 @@ def get_data_summary() -> dict:
             download_dir, existing, settings.download_timeout_seconds
         )
 
-        filename = f"data_summary_{datetime.now().strftime('%y-%m-%d')}.csv"
+        # Year is in the filename (not just the destination folder) so two
+        # years downloaded in the same run don't overwrite each other's local
+        # copy when keep_local_copy is on.
+        label = year or "latest"
+        filename = f"data_summary_{label}_{datetime.now().strftime('%y-%m-%d')}.csv"
         target = os.path.join(download_dir, filename)
         if os.path.exists(target):
             os.remove(target)
@@ -198,7 +207,7 @@ def get_data_summary() -> dict:
         }
 
         if settings.upload_to_drive:
-            summary["drive_file_id"] = _upload_to_drive(target, filename)
+            summary["drive_file_id"] = _upload_to_drive(target, filename, drive_folder_id)
             summary["uploaded_to_drive"] = True
 
             if not settings.keep_local_copy:
@@ -214,6 +223,36 @@ def get_data_summary() -> dict:
 
     finally:
         driver.quit()
+
+
+def get_data_summary() -> dict:
+    """Run the full download for every configured report year (see
+    Settings.report_years), each uploaded to its own Drive folder.
+
+    Every configured year is attempted even if an earlier one fails, so one
+    bad year does not stop the other from being fetched. If any year failed,
+    this still raises once all attempts are done - a partially successful
+    night must not look like a clean one to the scheduler - but the
+    exception message includes which years succeeded.
+    """
+    results: dict[str, dict] = {}
+    errors: dict[str, str] = {}
+
+    for report in settings.report_years:
+        year = report["year"]
+        label = year or "latest"
+        try:
+            results[label] = _download_one(year, report["drive_folder_id"])
+        except Exception as e:
+            errors[label] = str(e)
+            print(f"LLWR download failed for {label}: {e}")
+
+    if errors:
+        raise LlwrDownloadError(
+            f"Failed for: {errors}. Succeeded for: {list(results.keys())}"
+        )
+
+    return results
 
 
 if __name__ == '__main__':
