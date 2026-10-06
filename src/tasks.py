@@ -40,7 +40,7 @@ def llwr_health():
     return {
         "ok": True,
         "portal_configured": bool(settings.portal_username and settings.portal_password),
-        "report_years": [r["year"] or "(latest offered)" for r in settings.report_years],
+        "report_configs": [f"{r['prefix']} ({r['year'] or 'latest'})" for r in settings.report_configs],
         "download_dir": settings.download_dir,
         "drive_upload_enabled": settings.upload_to_drive,
         "google_credentials_ok": google_ok,
