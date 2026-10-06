@@ -107,33 +107,58 @@ class Settings:
         return str(self._section("report", "year", "LLWR_YEAR", ""))
 
     @property
-    def report_years(self) -> list[dict[str, str]]:
-        """Academic years to download in one run, each to its own Drive folder.
+    def report_configs(self) -> list[dict[str, str]]:
+        """Reports to download in one run, each to its own Drive folder.
 
-        The portal only shows one academic year as "current" at a time, so
-        around rollover the previous year drops off report.year's "latest
-        offered" fallback while it may still need pulling daily. Configure
-        multiple years explicitly:
-
-            "report": {"years": [
-                {"year": "2025", "drive_folder_id": "..."},
-                {"year": "2026", "drive_folder_id": "..."}
-            ]}
-
-        Falls back to the single report.year / output.drive_folder_id pair
-        when report.years is not set, so existing single-year configs keep
-        working unchanged.
+        Supports dynamic configuration but falls back to pulling the primary
+        data summary plus the ACL report if no explicit configs list is found.
         """
-        years = (self.llwr_config.get("report") or {}).get("years")
-        if years:
+        configs = (self.llwr_config.get("report") or {}).get("configs")
+        if configs:
             return [
+                {
+                    "year": str(entry.get("year", "")),
+                    "drive_folder_id": entry.get("drive_folder_id") or self.drive_folder_id,
+                    "provider": entry.get("provider") or self.report_provider,
+                    "prefix": entry.get("prefix") or "data_summary",
+                    "url": entry.get("url") or self.report_url,
+                }
+                for entry in configs
+            ]
+
+        # Legacy fallback logic for existing single/multi-year standard reports
+        legacy_years = (self.llwr_config.get("report") or {}).get("years")
+        reports = []
+        if legacy_years:
+            reports = [
                 {
                     "year": str(entry["year"]),
                     "drive_folder_id": entry.get("drive_folder_id") or self.drive_folder_id,
+                    "provider": self.report_provider,
+                    "prefix": "data_summary",
+                    "url": self.report_url,
                 }
-                for entry in years
+                for entry in legacy_years
             ]
-        return [{"year": self.report_year, "drive_folder_id": self.drive_folder_id}]
+        else:
+            reports = [{
+                "year": self.report_year,
+                "drive_folder_id": self.drive_folder_id,
+                "provider": self.report_provider,
+                "prefix": "data_summary",
+                "url": self.report_url,
+            }]
+
+        # Add the explicit 2026 ACL report requirement with its custom URL
+        reports.append({
+            "year": "2026",
+            "drive_folder_id": self.drive_folder_id,
+            "provider": "Bridgend ACL (A1672000)",
+            "prefix": "acl_summary",
+            "url": "https://post16-portal-service.gov.wales/Inform/Reports/RenderInNewWindow.aspx?r=75",
+        })
+
+        return reports
 
     @property
     def report_third_parameter(self) -> str:
@@ -177,12 +202,6 @@ class Settings:
         return str(value).lower() not in ("false", "0", "no")
 
     # --- Google auth (mounted, non-interactive) ---
-
-    # Deliberately NOT under /config: that mount is read-only by convention in
-    # our stacks, and the token has to be writable so refreshes persist. A
-    # writable mount nested inside a read-only one also fails outright at
-    # container start (Docker cannot create the mountpoint), so the writable
-    # secret gets its own top-level path.
     GOOGLE_DIR_DEFAULT = "/secrets"
 
     @property
@@ -241,18 +260,6 @@ class Settings:
 
     @property
     def redis_result_db(self) -> int:
-        """Redis DB for Celery results.
-
-        Must match what the *gateway* reads from, because the gateway is what
-        polls these task results to decide a run finished. The gateway builds
-        its backend from `redis.cache_db`, so that is the source of truth here
-        - not `redis.celery_db`, which the gateway never reads and which
-        ipc_config.json does not even define. Getting this wrong does not fail
-        loudly: the task runs and stores its result somewhere the gateway never
-        looks, so the job simply never leaves "running".
-
-        Set `celery.result_backend_db` to override deliberately.
-        """
         explicit = self.ipc_config.get("celery", {}).get("result_backend_db")
         if explicit is not None:
             return int(explicit)
@@ -260,7 +267,6 @@ class Settings:
 
     @property
     def celery_broker_url(self) -> str:
-        # Built exactly as the gateway builds it, password-encoding included.
         encoded_pass = quote_plus(self.rabbitmq_password)
         vhost_part = f"/{self.rabbitmq_vhost}" if self.rabbitmq_vhost else "/"
         return (
@@ -278,18 +284,6 @@ class Settings:
 
     @property
     def celery_result_expires(self) -> int:
-        """How long a finished task's result lives in Redis, in seconds.
-
-        Celery defaults to 24 hours. That is far longer than anything reads
-        one: the gateway's dispatcher polls a result within a minute of the
-        task finishing and never looks again. A day of results from the bulk
-        queries (some over 1 MB each) reached 1.4 GB on a 4 GB host and got
-        Redis OOM-killed.
-
-        The floor is "longest task + polling interval" - shorter than that and
-        a result can vanish before the dispatcher reads it, which puts the job
-        back to looking permanently stuck.
-        """
         value = self.ipc_config.get("celery", {}).get("result_expires")
         return int(value) if value not in (None, "") else 3600
 
