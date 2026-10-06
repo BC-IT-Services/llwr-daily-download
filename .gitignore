@@ -9,3 +9,4 @@ config/*.json
 !config/*.json.example
 data/
 secrets/
+test_downloads/

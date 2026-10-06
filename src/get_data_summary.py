@@ -144,9 +144,9 @@ def _upload_to_drive(file_path: str, filename: str, drive_folder_id: str) -> str
 
 
 def _download_one(year: str, drive_folder_id: str, provider: str, prefix: str, url: str) -> dict:
-    
     started = datetime.now(timezone.utc)
-    download_dir = settings.download_dir
+    # Convert the configured path to an absolute path before giving it to Chrome
+    download_dir = os.path.abspath(settings.download_dir)
     os.makedirs(download_dir, exist_ok=True)
 
     driver = _build_driver(download_dir)
@@ -172,8 +172,11 @@ def _download_one(year: str, drive_folder_id: str, provider: str, prefix: str, u
             download_dir, existing, settings.download_timeout_seconds
         )
 
+        # Year is in the filename (not just the destination folder) so two
+        # years downloaded in the same run don't overwrite each other's local
+        # copy when keep_local_copy is on.
         label = year or "latest"
-        dt_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dt_str = datetime.now().strftime("%y-%m-%d")
         filename = f"{prefix}_{label}_{dt_str}.csv"
         target = os.path.join(download_dir, filename)
         
