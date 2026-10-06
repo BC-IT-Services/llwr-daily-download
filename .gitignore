@@ -8,3 +8,4 @@ csvs/
 config/*.json
 !config/*.json.example
 data/
+secrets/

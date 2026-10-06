@@ -5,7 +5,7 @@ from __future__ import annotations
 import glob
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from googleapiclient.http import MediaFileUpload
 from selenium import webdriver
@@ -88,7 +88,8 @@ def _select_parameters(driver, wait, year: str, provider: str, url: str) -> None
     time.sleep(2)
 
     year_dd = Select(driver.find_element(By.ID, YEAR_DROPDOWN_ID))
-    available = [o.text.strip() for o in year_dd.options if o.text.strip()]
+    # Ignore empty strings and the "<Select a Value>" placeholder
+    available = [o.text.strip() for o in year_dd.options if o.text.strip() and not o.text.startswith("<")]
     if year:
         if year not in available:
             raise LlwrDownloadError(
@@ -143,7 +144,8 @@ def _upload_to_drive(file_path: str, filename: str, drive_folder_id: str) -> str
 
 
 def _download_one(year: str, drive_folder_id: str, provider: str, prefix: str, url: str) -> dict:
-    started = datetime.utcnow()
+    
+    started = datetime.now(timezone.utc)
     download_dir = settings.download_dir
     os.makedirs(download_dir, exist_ok=True)
 
@@ -200,9 +202,7 @@ def _download_one(year: str, drive_folder_id: str, provider: str, prefix: str, u
         else:
             print("Drive upload disabled by config - keeping local copy only.")
 
-        summary["duration_seconds"] = int(
-            (datetime.utcnow() - started).total_seconds()
-        )
+        summary["duration_seconds"] = int((datetime.now(timezone.utc) - started).total_seconds())
         return summary
 
     finally:
